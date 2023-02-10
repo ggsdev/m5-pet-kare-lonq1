@@ -1,5 +1,7 @@
 from rest_framework.views import APIView, status, Request, Response
 from rest_framework.pagination import PageNumberPagination
+
+from groups.serializers import GroupSerializer
 from .models import Pet
 from .serializers import PetSerializer
 from django.shortcuts import get_object_or_404
@@ -13,14 +15,12 @@ class PetView(APIView, PageNumberPagination):
             trait_param = request.query_params["trait"]
             trait = get_object_or_404(Trait, name=trait_param)
             pets = Pet.objects.filter(traits=trait)
+        else:
+            pets = Pet.objects.all()
 
-            serializer = PetSerializer(pets, many=True)
-            return Response(serializer.data)
-
-        pets = Pet.objects.all()
         result_page = self.paginate_queryset(pets, request, view=self)
-
         serializer = PetSerializer(result_page, many=True)
+
         return self.get_paginated_response(serializer.data)
 
     def post(self, request: Request) -> Response:
@@ -56,13 +56,13 @@ class PetView(APIView, PageNumberPagination):
 
 
 class PetViewDetail(APIView):
-    def get(self, request, pet_id):
-        pet_in_database = get_object_or_404(Pet, id=pet_id)
-        serializer = PetSerializer(pet_in_database)
+    def get(self, request: Request, pet_id) -> Response:
+        pet_object = get_object_or_404(Pet, id=pet_id)
+        serializer = PetSerializer(pet_object)
         return Response(serializer.data, status.HTTP_200_OK)
 
-    def patch(self, request, pet_id):
-        pet_in_database = get_object_or_404(Pet, id=pet_id)
+    def patch(self, request: Request, pet_id) -> Response:
+        pet_object = get_object_or_404(Pet, id=pet_id)
 
         serializer = PetSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -70,32 +70,39 @@ class PetViewDetail(APIView):
         group = serializer.validated_data.pop("group", None)
         traits = serializer.validated_data.pop("traits", None)
 
-        # if group:
-        #     group_object = Group.objects.filter(
-        #         scientific_name__iexact=group["scientific_name"]
-        #     ).first()
+        if group:
+            group_object = Group.objects.filter(
+                scientific_name__iexact=group["scientific_name"]
+            ).first()
+            if group_object:
+                pet_object.group = group_object
 
-        # if group_object:
-        #     for key, value in group.items():
-        #         setattr(pet_in_database.group, key, value)
-        #     pet_in_database.group.save()
-        # else:
-        #     new_group = Group.objects.create(**group)
-        #     pet_in_database.group = new_group
-        #     pet_in_database.group.save()
+            else:
+                new_group = Group.objects.create(**group)
+                pet_object.group = new_group
 
-        # if traits:
-        #     pass
+            pet_object.group.save()
+
+        if traits:
+            for trait in traits:
+                trait_object = Trait.objects.filter(name__iexact=trait["name"]).first()
+                if trait_object:
+                    for key, value in trait.items():
+                        setattr(pet_object.traits, key, value)
+                else:
+                    trait_object = Trait.objects.create(**trait)
+                pet_object.traits.add(trait_object)
 
         for key, value in serializer.validated_data.items():
-            setattr(pet_in_database, key, value)
-        pet_in_database.save()
-        serializer = PetSerializer(pet_in_database)
+            setattr(pet_object, key, value)
 
+        pet_object.save()
+
+        serializer = PetSerializer(pet_object)
         return Response(serializer.data)
 
-    def delete(self, request, pet_id):
-        pet_in_database = get_object_or_404(Pet, id=pet_id)
-        pet_in_database.delete()
+    def delete(self, request: Request, pet_id) -> Response:
+        pet_object = get_object_or_404(Pet, id=pet_id)
+        pet_object.delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
